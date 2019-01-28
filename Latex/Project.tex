@@ -1,0 +1,1057 @@
+\documentclass[english]{pkupaper}
+
+\usepackage{lipsum}
+\usepackage{essay-def}
+\usepackage{clrscode}
+\usepackage{appendix}
+\usepackage{mathrsfs}
+\usepackage{indentfirst}
+\usepackage{multirow}
+\usepackage{makecell}
+%\allowdisplaybreaks[4]
+
+\newenvironment{eqt}{\begin{equation}\begin{aligned}}{\end{aligned}\end{equation}}
+
+\newcommand{\titlemark}{Final project of Numerical Linear Algebra}
+
+\title{\titlemark}
+\author{1500010611 汪祎非}
+\date{}
+\bibliography{DeepL}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+This report is organized as follows: Section \ref{sec:dotb} describes how to use MAC scheme to discretize the Stokes equation and to attain the Saddle Point Problem. In Section \ref{sec:prob1}, we introduce two types of DGS: DGS in parallel \cite{mmfts} and DGS in sequence (in the notes); we describe the routine of V-Cycle multi-grid method. Section \ref{sec:prob2} introduces Uzawa Iteration, Inexact Uzawa Iteration and Inexact Uzawa Iteration based on V-Cycle multi-grid. We rigorously prove that Exact Uzawa Iteration will converge in at most 2 iteration under fair assumption. The numerical results is shown in Section \ref{sec:num}. In Appendix \ref{appendix}, we modify V-Cycle multi-grid method based on DGS a little bit and achieve great improvement on the original one. 
+
+\section{Description of the background}
+\label{sec:dotb}
+For 2-dimensional Stokes Equation in the region $\Omega=(0,1)^2$
+\begin{equation}
+\label{stokes}
+\begin{aligned}
+-\Delta \mfu +\nabla p =\mfF,\\
+-\nabla \cdot \mfu = 0.
+\end{aligned}
+\end{equation}
+where $\mfu=(u,v)$ is the velocity, $p$ is the pressure, $\mfF=(f,g)$ is the external force.
+
+The boundary condition is given by
+\begin{eqt}
+&\left.\frac{\p u}{\p \nu}\right|_{y=0}=b, \quad \left.\frac{\p u}{\p \nu}\right|_{y=1}=t,\\
+&\left.\frac{\p v}{\p \nu}\right|_{x=0}=l, \quad \left.\frac{\p v}{\p \nu}\right|_{x=1}=r,\\
+&\left.u\right|_{x=0}=\left.u\right|_{x=1}=0, \quad \left.v\right|_{y=0}=\left.v\right|_{y=1}=0,
+\end{eqt}
+where $\nu$ is the outer normal vector.
+
+We consider the external force to be specifies as 
+\begin{equation}
+\begin{aligned}
+&f(x,y)=-4\pi^2(2\cos(2\pi x)-1)\sin(2\pi y)+x^2,\\
+&g(x,y)=4\pi^2(2\cos(2\pi y)-1)\sin(2\pi x).
+\end{aligned}
+\end{equation}
+
+The true solution is given by
+\begin{eqt}
+\label{true_sol}
+&u(x,y)=(1-\cos(2\pi x))\sin (2\pi y),\\
+&v(x,y)=-(1-\cos(2\pi y))\sin (2\pi x),\\
+&p(x,y)=\frac{x^3}{3}-\frac{1}{12}.
+\end{eqt}
+
+Based on the true solution, we can calculate the boundary condition as follows:
+\begin{eqt}
+b(x)=-\left.\frac{\p u}{\p y}\right|_{y=0}=-2\pi (1-\cos(2\pi x)),\\
+t(x)=\left.\frac{\p u}{\p y}\right|_{y=1}=2\pi (1-\cos(2\pi x)),\\
+l(x)=-\left.\frac{\p v}{\p x}\right|_{x=0}=2\pi (1-\cos(2\pi y)),\\
+r(x)=\left.\frac{\p v}{\p x}\right|_{x=1}=-2\pi (1-\cos(2\pi y)).\\
+\end{eqt}
+
+For given scale of lattice $N$, and the step size $h=1/N$, we can discretize this PDE. We define
+\begin{eqt}
+&u_{i,j-\frac{1}{2}}\approx u(ih,(j-\frac{1}{2})h), \quad &0\leq i \leq N, 1\leq j\leq N,\\
+&v_{i-\frac{1}{2},j}\approx u((i-\frac{1}{2})h,jh), &1\leq i \leq N, 0\leq j\leq N,\\
+&p_{i-\frac{1}{2},j-\frac{1}{2}}\approx p((i-\frac{1}{2})h,(j-\frac{1}{2})h), &1\leq i \leq N, 1\leq j\leq N,\\
+&f_{i,j-\frac{1}{2}}=f(ih,(j-\frac{1}{2})h), & 1\leq i \leq N-1, 1\leq j\leq N,\\
+&g_{i-\frac{1}{2},j}=g((i-\frac{1}{2})h,jh), & 1\leq i \leq N, 1\leq j\leq N-1,\\
+&b_i=b(ih), \quad t_i=t(ih), & 1\leq i\leq N-1,\\
+&l_j=l(jh), \quad r_j=r(jh), & 1\leq j\leq N-1.
+\end{eqt}
+Here we use $\approx$ to indicate that $u_{i,j-\frac{1}{2}}, v_{i-\frac{1}{2},j}, p_{i-\frac{1}{2},j-\frac{1}{2}}$ are the numerical solution on the corresponding site instead of the true solution. Our notation here is slightly different from the notation in the assignment. 
+
+By the boundary condition, we have $u_{0,j+\frac{1}{2}}=u_{N,j+\frac{1}{2}}=v_{i+\frac{1}{2},0}=v_{i+\frac{1}{2},N}=0$. For the discrete form of $u$, $v$, we have $N(N-1)$ free variables respectively. For the discrete form of $p$, we have $N^2$ free variables. We denote $U\in\mbR^{(N-1)\times N}$ with $U_{i,j}=u_{i,j-\oot}$, $V\in \mbR^{N\times(N-1)}$ with $V_{i,j}=v_{i-\oot,j}$,  $P\in\mbR^{N\times N}$ with $P_{i,j}=p_{i-\oot,j-\oot}$, $F\in\mbR^{(N-1)\times N}$ with $F_{i,j}=f_{i,j-\oot}$ and $G\in \mbR^{N\times(N-1)}$ with $G_{i,j}=g_{i-\oot,j}$.
+
+\subsection{Definitions and notations}
+Here we state some useful definition and notations.
+\begin{definition}
+For a matrix $A\in \mbR^{m\times n}$, we define two mappings $\phi, \psi: \mbR^{m\times n}\to \mbR^{mn\times 1}$. $\phi(A)$ is with entry $\phi(A)_{i+m(j-1)}=A_{i,j}$. $\psi(A)$ is with entry $\psi(A)_{n(i-1)+j}=A_{i,j}$. 
+$A_{i,.}$ represents the $i$-th row of $A$; $A_{.,j}$ represents the $j$-th column of $A$. 
+\end{definition}
+From the above definition, we find that 
+\begin{eqt}
+\psi(A)=\phi(A^T),
+\end{eqt} 
+\begin{eqt}
+&\phi(A)=\begin{bmatrix}
+A_{.,1}\\
+ \vdots \\
+ A_{.,n}
+\end{bmatrix},\quad \psi(A)=\begin{bmatrix}
+A_{1,.}\\
+ \vdots \\
+ A_{n,.}
+\end{bmatrix}.
+\end{eqt}
+Suppose $a_1, a_2 \dots a_n \in\mbR^{n\times 1}$. Then, 
+\begin{eqt}
+\phi(\begin{bmatrix}
+a_1\\
+ \vdots \\
+a_n
+\end{bmatrix})=[a_1, a_2, \dots a_n],\quad \psi(\begin{bmatrix}
+a_1\\
+ \vdots \\
+a_n
+\end{bmatrix})=\begin{bmatrix}
+a_1^T\\
+ \vdots \\
+a_n^T
+\end{bmatrix}.
+\end{eqt}
+
+We use $\otimes$ to represent Kronecker’s product.
+\subsection{MAC scheme}
+We use MAC scheme to discretize \ref{stokes}. 
+
+We denote $T_{N-1}\in \mbR^{(N-1)\times (N-1)}$ with entries
+\begin{eqt}
+T_{N-1}=\begin{bmatrix}
+2&-1\\
+-1&\ddots&\ddots\\
+&\ddots&\ddots&-1\\
+&&-1&2\\
+\end{bmatrix},
+\end{eqt}
+$S_{N-1}\in \mbR^{(N-1)\times N}$ with entries
+\begin{eqt}
+S_{N-1}=\begin{bmatrix}
+-1&1\\
+&\ddots&\ddots\\
+&&-1&1\\
+\end{bmatrix}.
+\end{eqt}
+$S_{N-1}^{(2)}=S^T_{N-1}S_{N-1}\in \mbR^{(N-1)\times N}$. We can verify that $S_{N-1}^{(2)}$ is with entries
+\begin{eqt}\label{s2}
+S^{(2)}_{N-1}=\begin{bmatrix}
+1&-1\\
+-1&2&\ddots\\
+&\ddots&\ddots&\ddots\\
+&&\ddots&2&-1\\
+&&&-1&1\\
+\end{bmatrix},
+\end{eqt}
+
+We start with $u$. For $1\leq i \leq N-1, 2\leq j\leq N-1$, we have 
+\begin{equation}
+\label{fij}
+-\frac{1}{h^2}(u_{i+1,j-\oot}+u_{i-1,j-\oot}+u_{i,j+\oot}+u_{i,j-\frac{3}{2}}-4u_{i,j-\oot})+\frac{1}{h}(p_{i+\oot,j-\oot}-p_{i-\oot,j-\oot})=f_{i,j-\oot}.
+\end{equation}
+
+Stacking \ref{fij} with $1\leq i\leq N-1$, we have 
+\begin{eqt}
+\label{fij2}
+\frac{1}{h^2}\left(T_{N-1}U_{,.j}+2U_{,.j}-U_{,.j-1}-U_{,.j+1}\right)+\frac{1}{h}S_{N-1}P_{.,j}=F_{.,j}.
+\end{eqt}
+
+For $1\leq i \leq N-1, j=1$, we have 
+\begin{eqt}
+\label{bi}
+-\frac{1}{h^2}(u_{i+1,j-\oot}+u_{i-1,j-\oot}+u_{i,j+\oot}-3u_{i,j-\oot}+hb_i)+\frac{1}{h}(p_{i+\oot,j-\oot}-p_{i-\oot,j-\oot})=f_{i,j-\oot}.
+\end{eqt}
+
+Stacking \ref{bi} with $1\leq i\leq N-1$, we have 
+\begin{eqt}
+\label{bi2}
+\frac{1}{h^2}\left(T_{N-1}U_{,.j}+U_{,.j}-U_{,.j+1}-hb\right)+\frac{1}{h}S_{N-1}P_{.,j}=F_{.,j}.
+\end{eqt}
+
+For $1\leq i \leq N-1, j=N$, we have 
+\begin{eqt}
+\label{ti}
+-\frac{1}{h^2}(u_{i+1,j-\oot}+u_{i-1,j-\oot}+u_{i,j-\frac{3}{2}}-3u_{i,j-\oot}+ht_i)+\frac{1}{h}(p_{i+\oot,j-\oot}-p_{i-\oot,j-\oot})=f_{i,j-\oot}.
+\end{eqt}
+
+Stacking \ref{ti} with $1\leq i\leq N-1$, we have 
+\begin{eqt}
+\label{ti2}
+\frac{1}{h^2}\left(T_{N-1}U_{,.j}+U_{,.j}-U_{,.j-1}-ht\right)+\frac{1}{h}S_{N-1}P_{.,j}=F_{.,j}.
+\end{eqt}
+
+We denote $A_N\in \mbR^{N(N-1)\times N(N-1)}$, $B^{(1)}_N\in\mbR^{N(N-1)\times N^2}$ and $F^{(bt)}\in \mbR^{N(N-1)\times1}$
+\begin{eqt}
+\label{an}
+A_N=\begin{bmatrix}
+I_{N-1}+T_{N-1}&-I_{N-1}\\
+-I_{N-1}&2I_{N-1}+T_{N-1}&-I_{N-1}\\
+&\ddots&\ddots&\ddots\\
+&&\ddots&2I_{N-1}+T_{N-1}&-I_{N-1}\\
+&&&-I_{N-1}&I_{N-1}+T_{N-1}\\
+\end{bmatrix},
+\end{eqt}
+
+\begin{eqt}\label{bn1}
+B_N^{(1)}=\begin{bmatrix}
+S_{N-1}\\
+&\ddots\\
+&&S_{N-1}\\
+\end{bmatrix}=I_N\otimes S_{N-1}, \quad F^{(bt)}=\phi(F)+\frac{1}{h}\begin{bmatrix}
+b\\
+0\\
+\vdots\\
+0\\
+\end{bmatrix}+\frac{1}{h}\begin{bmatrix}
+0\\
+\vdots\\
+0\\
+t\\
+\end{bmatrix}.
+\end{eqt}
+Indeed, $A_N=S_{N-1}^{(2)}\otimes I_{N-1}+I_{N}\otimes T_{N-1}$.
+
+Therefore, we can combine \ref{fij2}, \ref{bi2}, \ref{ti2} together in the matrix form:
+\begin{eqt}
+\label{u1}
+&\frac{1}{h^2}
+A_N\phi(U)+\frac{1}{h}
+B_N^{(1)}\phi(P)=F^{(bt)}.
+\end{eqt}
+
+
+Then, we deal with $v$. We denote $e^{(i)}_N\in \mbR^{N\times 1}$ to be the vector with $i$-th entry is $1$ and other entries are $0$. We denote $R_N^{(i)}\in \mbR^{(N-1)\times N^2}$.
+\begin{eqt}
+\label{rni}
+R_N^{(i)}=\begin{bmatrix}
+-(e_{N}^{(i)})^T & (e_{N}^{(i)})^T\\
+&\ddots&\ddots\\
+&&-(e_{N}^{(i)})^T & (e_{N}^{(i)})^T\\
+\end{bmatrix}=S_{N-1}\otimes(e_{N}^{(i)})^T.
+\end{eqt}
+It is easy to verify that 
+\begin{eqt}
+R_N^{(i)}\phi(P)=\begin{bmatrix}
+-(e_{N}^{(i)})^T & (e_{N}^{(i)})^T\\
+&\ddots&\ddots\\
+&&-(e_{N}^{(i)})^T & (e_{N}^{(i)})^T\\
+\end{bmatrix}
+\begin{bmatrix}
+P_{.,1}\\
+\vdots\\
+P_{.,n}\\
+\end{bmatrix}
+=\begin{bmatrix}
+P_{i,2}-P_{i,1}\\
+\vdots\\
+P_{i,N}-P_{i,N-1}\\
+\end{bmatrix}.
+\end{eqt}
+
+For $2\leq i \leq N-1, 1\leq j\leq N-1$, we have 
+\begin{equation}
+\label{gij}
+-\frac{1}{h^2}(v_{i-\oot,j+1}+v_{i-\oot,j-1}+v_{i+\oot,j}+v_{i-\frac{3}{2},j}-4v_{i-\oot,j})+\frac{1}{h}(p_{i-\oot,j+\oot}-p_{i-\oot,j-\oot})=g_{i-\oot,j}.
+\end{equation}
+Stacking \ref{gij} with $1\leq j\leq N-1$, we have
+\begin{eqt}
+\label{gij2}
+\frac{1}{h^2}\left(T_{N-1}V_{i,.}^T+2V_{i,.}-V_{i+1,.}^T-V_{i-1,.}^T\right)+R_N^{(i)}\phi(P)=G_{i,.}^T.
+\end{eqt}
+
+For $i=1, 1\leq j \leq N-1$, we have 
+\begin{eqt}
+\label{lj}
+-\frac{1}{h^2}(v_{i-\oot,j+1}+v_{i-\oot,j-1}+v_{i+\oot,j }-3v_{i-\oot,j}+hl_j)+\frac{1}{h}(p_{i-\oot,j+\oot}-p_{i-\oot,j-\oot})=g_{i-\oot,j}.
+\end{eqt}
+Stacking \ref{lj} with $1\leq j\leq N-1$, we have
+\begin{eqt}
+\label{lj2}
+\frac{1}{h^2}\left(T_{N-1}V_{i,.}^T+V_{i,.}-V_{i+1,.}^T-hl\right)+R_N^{(i)}\phi(P)=G_{i,.}^T.
+\end{eqt}
+
+For $i=N, 1\leq j \leq N-1$, we have 
+\begin{eqt}
+\label{rj}
+-\frac{1}{h^2}(v_{i-\oot,j+1}+v_{i-\oot,j-1}+v_{i-\frac{3}{2},j }-3v_{i-\oot,j}+hr_j)+\frac{1}{h}(p_{i-\oot,j+\oot}-p_{i-\oot,j-\oot})=g_{i-\oot,j}
+.\end{eqt}
+Stacking \ref{rj} with $1\leq j\leq N-1$, we have
+\begin{eqt}
+\label{rj2}
+\frac{1}{h^2}\left(T_{N-1}V_{i,.}^T+2V_{i,.}-V_{i+1,.}^T-V_{i-1,.}^T-hr\right)+R_N^{(i)}\phi(P)=G_{i,.}^T
+.\end{eqt}
+
+We denote $B_N^{(2)}\in\mbR^{N(N-1)\times N^2}$ and $G^{(lr)}\in \mbR^{N(N-1)\times1}$.
+
+\begin{eqt}\label{bn2}
+B_N^{(2)}=\begin{bmatrix}R_N^{(1)}\\
+\vdots\\
+R_N^{(N)}\\
+\end{bmatrix},\quad G^{(lr)}=\psi(G)+\frac{1}{h}\begin{bmatrix}
+l\\
+0\\
+\vdots\\
+0\\
+\end{bmatrix}+\frac{1}{h}\begin{bmatrix}
+0\\
+\vdots\\
+0\\
+r\\
+\end{bmatrix}.
+\end{eqt}
+Therefore, we can combine \ref{gij2}, \ref{lj2}, \ref{rj2} together in the following matrix form:
+\begin{eqt}
+A_N\psi(V)+B_N^{(2)}\phi(P)=G^{(lr)}.
+\end{eqt}
+
+And we also have the following linear constraints from $\nabla \cdot \mfu=0$. For $1\leq i\leq N$ and $1\leq j\leq N$, we have
+\begin{eqt}
+\label{divu}
+-\frac{1}{h}(u_{i,j-\oot}-u_{i-1,j-\oot})-\frac{1}{h}(v_{i-\oot,j}-v_{i-\oot,j-1})=0.
+\end{eqt}
+
+We observe that 
+\begin{eqt}
+(B_N^{(1)})^T\phi(U)=\begin{bmatrix}
+S_{N-1}^T\\
+&\ddots\\
+&&S_{N-1}^T\\
+\end{bmatrix}
+\begin{bmatrix}
+U_{.,1}\\
+\vdots\\
+U_{.,N}\\
+\end{bmatrix}=\begin{bmatrix}
+S_{N-1}^TU_{.,1}\\
+\vdots\\
+S_{N-1}^TU_{.,N}\\
+\end{bmatrix},
+\end{eqt}
+where
+\begin{eqt}
+S_{N-1}^TU_{.,j}=\begin{bmatrix}
+-1\\
+1&\ddots\\
+&\ddots&-1\\
+&&1\\
+\end{bmatrix}
+\begin{bmatrix}
+U_{1,j}\\
+\vdots\\
+U_{N-1,j}
+\end{bmatrix}=\begin{bmatrix}
+U_{0,j}-U_{1,j}\\
+\vdots\\
+U_{N-1,j}-U_{N,j}
+\end{bmatrix}.
+\end{eqt}
+Therefore, we have
+\begin{eqt}
+\label{bn1t}
+(B_N^{(1)})^T\phi(U)= \sum_{j=1}^Ne_N^{(j)}\otimes\begin{bmatrix}
+U_{0,j}-U_{1,j}\\
+\vdots\\
+U_{N-1,j}-U_{N,j}
+\end{bmatrix}
+\end{eqt}
+We also observe that
+\begin{eqt}
+&(B_N^{(2)})^T\psi(V)=\left[(R_N^{(1)})^T, \dots (R_N^{(N)})^T\right]\begin{bmatrix}
+(V_{1,.})^T\\
+\vdots\\
+(V_{N,.})^T\\
+\end{bmatrix}\\
+=&\left[S_{N-1}^T\otimes e_N^{(1)}, \dots S_{N-1}^T\otimes e_N^{(N)}\right]\begin{bmatrix}
+(V_{1,.})^T\\
+\vdots\\
+(V_{N,.})^T\\
+\end{bmatrix}=\sum_{i=1}^N\left(S_{N-1}^T\otimes e_N^{(i)}\right)(V_{i,.})^T,
+\end{eqt}
+where
+\begin{eqt}
+&\left(S_{N-1}^T\otimes e_N^{(i)}\right)(V_{i,.})^T
+=\begin{bmatrix}
+-e_N^{(i)}\\
+e_N^{(i)}&\ddots\\
+&\ddots&-e_N^{(i)}\\
+&&e_N^{(i)}\\
+\end{bmatrix}
+\begin{bmatrix}
+V_{i,1}\\
+\vdots\\
+V_{i,N}\\
+\end{bmatrix}=\begin{bmatrix}
+V_{i,0}-V_{i,1}\\
+\vdots\\
+V_{i,N-1}-V_{i,N}\\
+\end{bmatrix}\otimes e_N^{(i)}.
+\end{eqt}
+Therefore, 
+\begin{eqt}
+\label{bn2t}
+(B_N^{(2)})^T\psi(V)=\sum_{i=1}^N\begin{bmatrix}
+V_{i,0}-V_{i,1}\\
+\vdots\\
+V_{i,N-1}-V_{i,N}\\
+\end{bmatrix}\otimes e_N^{(i)}.
+\end{eqt}
+Stacking \ref{divu} from $1\leq i\leq N$ and $1\leq j\leq N$, we get
+\begin{eqt}
+\frac{1}{h}\lp B_N^{(1)}\rp^T\phi(U)+\frac{1}{h}\lp B_N^{(2)}\rp^T\psi(V)=0.
+\end{eqt}
+
+In summary, we denote $\mfA\in\mbR^{2N(N-1)\times2N(N-1)}$, $\mfB\in \mbR^{2N(N-1)\times N^2}, \mfU \in\mbR^{2N(N-1)\times1}, \mfP\in \mbR^{N^2\times1}, \mfF \in\mbR^{2N(N-1)\times1}$
+\begin{equation}
+\mfA=\frac{1}{h^2}\begin{bmatrix}
+A_N\\
+&A_N
+\end{bmatrix},\, \mfB=\frac{1}{h}\begin{bmatrix}
+B^{(1)}_N\\
+B^{(2)}_N
+\end{bmatrix},\,\mfU=\begin{bmatrix}
+\phi(U)\\
+\psi(V)
+\end{bmatrix},\, \mfP=
+\phi(P),\, \mfF=\begin{bmatrix}
+F^{(bt)}\\
+G^{(lr)}
+\end{bmatrix}.
+\end{equation}
+where $A_N$ is defined in \ref{an}; $B_N^{(1)}$ and  $F^{(bt)}$ is defined in \ref{bn1}; $B_N^{(2)}$ and $G^{(lr)}$ is defined in \ref{bn2}.
+
+Then we derive the following Saddle Point Problem as the discretization of Stokes equation \ref{stokes} with boundary conditions.
+\begin{equation}
+\label{spp}
+\begin{bmatrix}
+\mfA&\mfB\\\mfB^T&0
+\end{bmatrix}\begin{bmatrix}
+\mfU\\\mfP
+\end{bmatrix}=\begin{bmatrix}
+\mfF\\0
+\end{bmatrix}.
+\end{equation}
+We can also rescale \ref{spp} by introducing $\tilde \mfA = h^2\mfA, \tilde \mfB = h^2\mfB$ and $\tilde \mfF=h^2\mfF$. Then, \ref{spp} turns to be 
+\begin{equation}
+\label{rspp}
+\begin{bmatrix}
+\tilde\mfA&\tilde\mfB\\\tilde\mfB^T&0
+\end{bmatrix}\begin{bmatrix}
+\mfU\\\mfP
+\end{bmatrix}=\begin{bmatrix}
+\tilde\mfF\\0
+\end{bmatrix}.
+\end{equation}
+In our numerical experiment, the residual is for \ref{rspp}, instead of for \ref{spp}. 
+
+\section{V-Cycle Multi-Grid Based on DGS (Problem 1)}
+\label{sec:prob1}
+We consider to use V-cycle multi-grid method to solve \ref{spp}. We use Distributive Gauss-Seidel (DGS) Iteration as smoother. Before we state the algorithm, we make several preparations: we calculate $\mfB^T\mfB$. Actually,
+\begin{eqt}
+\mfB^T\mfB=\frac{1}{h^2}\left(\left(\mfB^{(1)}\right)^T\mfB^{(1)}+(\mfB^{(2)})^T\mfB^{(2)}\right).
+\end{eqt}
+From \ref{s2} and \ref{bn1}, $(\mfB^{(1)})^T\mfB^{(1)}=I_N\otimes (S_{N-1}^TS_{N-1})=I_N\otimes (S_{N-1}^{(2)})$. From \ref{bn2} and \ref{rni}, 
+\begin{eqt}
+&\left(\mfB^{(2)}\right)^T\mfB^{(2)}=\sum_{i=1}^N\left(R_N^{(i)}\right)^TR_N^{(i)}=\sum_{i=1}^N\left(S_{N-1}\otimes \left(e_N^{(i)}\right)^T\right)^T\left(S_{N-1}\otimes \left(e_N^{(i)}\right)^T\right)\\
+=&\sum_{i=1}^NS_{N-1}^{(2)}\otimes\left(e_N^{(i)}\left(e_N^{(i)}\right)^T\right)=S_{N-1}^{(2)}\otimes I_N.
+\end{eqt}
+
+If we denote
+\begin{eqt}
+b^{(1)}=[2,3,\dots, 3,2],\quad b^{(2)}=[3,4,\dots, 4,3],
+\end{eqt}
+then, we can write $\mfB^T\mfB$ explicitly:
+\begin{eqt}
+\mfB^T\mfB=\frac{1}{h^2}\begin{bmatrix}
+\mathrm{diag}(b^{(1)})&-I_N\\
+-I_N&\mathrm{diag}(b^{(2)})&\ddots\\
+&\ddots&\ddots&\ddots\\
+&&\ddots&\mathrm{diag}(b^{(2)})&-I_N\\
+&&\ddots&-I_N&\mathrm{diag}(b^{(1)})\\
+\end{bmatrix}.
+\end{eqt}
+
+We then introduce a diagonal matrix $\tilde \mfD\in \mbR^{N^2, N^2}$ as the inverse of the diagonal part of $\mfB^T\mfB$, i.e.
+\begin{eqt}
+\label{mfD}
+\mfD=h^2\mathrm{diag}([d^{(1)}, d^{(2)}, \dots d^{(2)}, d^{(1)}]),
+\end{eqt}
+where $d^{(1)}, d^{(2)}\in\mfR^N$ with entries 
+\begin{eqt}
+d^{(1)}=[1/2,1/3,\dots, 1/3,1/2],\quad d^{(2)}=[1/3,1/4,\dots, 1/4,1/3].
+\end{eqt}
+
+For $1\leq i,j\leq N$, we can classify $(i,j)$ into three groups:
+\begin{itemize}
+\item Inner unit: $2\leq i\leq N-1$ and $2\leq j\leq N-1$;
+\item Edge unit: $i=1,N$, $2\leq j\leq N-1$ or $2\leq i\leq N-1$, $j=1,N$;
+\item Point unit: $i=1,N$, $j=1,N$.
+\end{itemize}
+Given a matrix $B'\in \mbR^{N\times N}$, if we let its inner unit be $1/4$, edge unit be $1/3$ and point unit be $1/2$. Then, we directly have
+\begin{eqt}
+\label{btb}
+\frac{1}{h^2}\mathrm{diag}(\mfD)=\phi(B').
+\end{eqt}
+
+\subsection{DGS Iteration}
+Suppose the initial values are $\mfU^{(0)}=\begin{bmatrix}\psi(U^{(0)})\\ \phi(V^{(0)})\end{bmatrix}$ and $\mfP^{(0)}=\psi(\mfP^{(0)})$. Let $k=0$, $\mfA=D_{\mfA}-L_{\mfA}-U_{\mfA}$. 
+The DGS iteration is defined as follows:
+
+Given $\mfU^{(k)}$ and $\mfP^{(k)}$, we first use Gauss-Seidel Iteration to update velocity $\mfU^{(k+1/2)}$,
+\begin{eqt}
+\label{mfU}
+\mfU^{(k+1/2)}=\mfU^{(k)}+(D_\mfA-L_\mfA)^{-1}(F-\mfB\mfP^{(k)}-\mfA\mfU_k).
+\end{eqt}
+
+We denote $Q\in\mbR^{N\times N}$ and write $\mfQ=\phi(Q)$, then calculate $\mfQ$ as follows:
+\begin{eqt}
+\label{mfQ}
+\mfQ=\mfD(-\mfB^T \mfU^{(k+1/2)}).
+\end{eqt}
+
+Finally, we update $\mfU^{(k+1)}$ and $\mfP^{(k+1)}$ by
+\begin{eqt}
+\label{updup}
+\mfU^{(k+1)}=\mfU^{(k+1/2)}+\mfB\mfQ, \quad \mfP^{(k+1)}=\mfP^{(k)}-\mfB^T\mfB\mfQ
+\end{eqt}
+
+This update routine is introduced in \cite{mmfts}. We shall point out that this is quite similar to the DGS iteration in the notes. Nevertheless, this routine is performed in parallel while routine on the notes is performed in sequence. 
+
+Here we show that update routine in \cite{mmfts} has only minor differences to DGS (notes) if we update DGS (notes) in parallel. We denote $D'\in\mbR^{N\times N}$ with $0$ on its inner unit, $1$ on its edge unit and $2$ on its point unit. Then we denote $\tilde \mfD\in \mbR^{N^2\times N^2}$ with entries $\tilde \mfD=\mathrm{diag}(\phi(D'))$. We assert that the update rule of DGS (notes) in parallel can be written in the matrix form as: 
+\begin{itemize}
+\item Update $\mfU^{(k+1/2)}$ by \ref{mfU}.
+\item Calculate $\mfQ$ by \ref{mfQ}.
+\item Update $\mfU^{(k+1)}$ and $\mfP^{(k+1)}$ by
+\begin{eqt}
+\label{dgsp}
+\mfU^{(k+1)}=\mfU^{(k+1/2)}+\mfB\mfQ, \quad \mfP^{(k+1)}=\mfP^{(k)}-(\mfB^T\mfB+\tilde \mfD)\mfQ.
+\end{eqt}
+\end{itemize}
+The minor differences is that DGS (notes) in parallel has an additional $\tilde\mfD$.
+
+For DGS (notes) in parallel, the calculation of $\mfU^{(k+1/2)}$ is as same as the notes. In the notes, $r_{i,j}$, the residual of the divergence equation \ref{divu} is calculated through:
+\begin{eqt}
+\label{divequ}
+r_{i,j}=\frac{u^{(k+1/2)}_{i,j-\oot}-u^{(k+1/2)}_{i-1,j-\oot}}{h}+\frac{v^{(k+1/2)}_{i-\oot,j}-v^{(k+1/2)}_{i-\oot,j-1}}{h},
+\end{eqt}
+
+We shall point out that \ref{divequ}  is the major difference between updating in sequence and updating in parallel. $r_{i,j}$ in parallel only considers the value of $u$ and $v$ at $(k+1/2)$ while $r_{i,j}$ in parallel considers the value of $u$ and $v$ at $k+1$. If we write $R\in \mbR^{N\times N}$ with entries $r_{i,j}$ and $\mfR=\phi(R)$, then \ref{divequ} is equivalent to
+\begin{eqt}
+\label{mfR}
+\mfR=-\mfB^T\mfU^{(k+1/2)}.
+\end{eqt}
+
+The calculation of $\delta_{i,j}$ is based on the classification of $(i,j)$:
+\begin{itemize}
+\item $(i,j)$ is an inner unit: $\delta_{i,j}=\frac{h}{4}r_{i,j}$; 
+\item $(i,j)$ is an egde unit: $\delta_{i,j}=\frac{h}{3}r_{i,j}$; 
+\item $(i,j)$ is an point unit: $\delta_{i,j}=\frac{h}{2}r_{i,j}$.
+\end{itemize}
+
+We write $\mfQ$ as $\mfQ=\phi(Q)$, where $Q\in \mbR^{N\times N}$ is with entries $q_{i,j}$. Directly from the definition of $\mfD$ and \ref{btb}, we have
+\begin{eqt}
+q_{i,j} = \frac{1}{h}\delta_{i,j}.
+\end{eqt}
+
+For the inner unit $(i,j)$, the update of  $\mfU^{(k+1)}$ is given by
+\begin{eqt}
+\label{uinner}
+u_{i-1,j-\oot}^{(k+1)}=u_{i-1,j-\oot}^{(k+1/2)}+\delta_{i,j}, \quad u_{i,j-\oot}^{(k+1)}=u_{i,j-\oot}^{(k+1/2)}-\delta_{i,j},\\
+v_{i-\oot,j-1}^{(k+1)}=v_{i-\oot,j-1}^{(k+1/2)}+\delta_{i,j}, \quad v_{i-\oot,j}=v_{i-\oot,j}^{(k+1/2)}-\delta_{i,j}.
+\end{eqt}
+The update of $\mfP^{(k+1)}$ is given by
+\begin{eqt}
+p_{i-\oot,j-\oot}^{(k+1)}=p_{i-\oot,j-\oot}^{(k)}-\frac{4}{h}\delta_{i,j}, \quad p_{i+\oot,j-\oot}^{(k+1)}=p_{i+\oot,j-\oot}^{(k)}+\frac{1}{h}\delta_{i,j}, \quad p_{i-\frac{3}{2},j-\oot}^{(k+1)}=p_{i-\frac{3}{2},j-\oot}^{(k)}+\frac{1}{h}\delta_{i,j},
+\end{eqt}
+\begin{eqt}
+\label{pinner}
+p_{i-\oot,j+\oot}^{(k+1)}=p_{i-\oot,j+\oot}^{(k)}+\frac{1}{h}\delta_{i,j}, \quad p_{i-\oot,j-\frac{3}{2}}^{(k+1)}=p_{i-\oot,j-\frac{3}{2}}^{(k)}+\frac{1}{h}\delta_{i,j}.
+\end{eqt}
+
+For edge unit, we take $2\leq i\leq N-1$, $j=N$ for example. The influence of $\delta_{i,N}$ on $\mfU^{(k+1)}$ is given by
+\begin{eqt}
+\label{uedge}
+&u_{i-1,N-\oot}^{(k+1)}=u_{i-1,N-\oot}^{(k+1/2)}+\delta_{i,N}, \  u_{i,N-\oot}^{(k+1)}=u_{i,N-\oot}^{(k+1/2)}-\delta_{i,N}, \ v_{i-\oot,N-1}^{(k+1)}=v_{i-\oot,N-1}^{(k+1/2)}+\delta_{i,N}.
+\end{eqt}
+The update rule of $\mfP^{(k+1)}$ is given by
+\begin{eqt}
+p_{i-\oot,N-\oot}^{(k+1)}=p_{i-\oot,N-\oot}^{(k)}-\frac{4}{h}\delta_{i,N}, \quad p_{i+\oot,N-\oot}^{(k+1)}=p_{i+\oot,N-\oot}^{(k)}+\frac{1}{h}\delta_{i,N},\\
+p_{i-\frac{3}{2},N-\oot}^{(k+1)}=p_{i-\frac{3}{2},N-\oot}^{(k)}+\frac{1}{h}\delta_{i,N}, \quad p_{i-\oot,N-\frac{3}{2}}^{(k+1)}=p_{i-\oot,N-\frac{3}{2}}^{(k)}+\frac{1}{h}\delta_{i,N}.
+\end{eqt}
+For DGS \cite{mmfts}, we shall have $p_{i-\oot,N-\oot}^{(k+1)}=p_{i-\oot,N-\oot}^{(k)}-\frac{3}{h}\delta_{i,N}$ instead.
+
+For point unit, we take $i=N, j=N$ for example. The update of  $\mfU^{(k+1)}$ is given by
+\begin{eqt}
+\label{upoint}
+&u_{N-1,N-\oot}^{(k+1)}=u_{N-1,N-\oot}^{(k+1/2)}+\delta_{N,N}, \ v_{N-\oot,N-1}^{(k+1)}=v_{N-\oot,N-1}^{(k+1/2)}+\delta_{N,N}.
+\end{eqt}
+
+The update of $\mfP^{(k+1)}$ is given by
+\begin{eqt}
+&p_{N-\oot,N-\oot}^{(k+1)}=p_{N-\oot,N-\oot}^{(k)}-\frac{4}{h}\delta_{N,N}, \ p_{N-\frac{3}{2},N-\oot}^{(k+1)}=p_{N-\frac{3}{2},N-\oot}^{(k)}+\frac{1}{h}\delta_{N,N}, \\
+& p_{N-\oot,N-\frac{3}{2}}^{(k+1)}=p_{N-\oot,N-\frac{3}{2}}^{(k)}+\frac{1}{h}\delta_{N,N}.
+\end{eqt}
+For DGS \cite{mmfts}, we shall have $p_{N-\oot,N-\oot}^{(k+1)}=p_{N-\oot,N-\oot}^{(k)}-\frac{2}{h}\delta_{N,N}$ instead.
+
+The minor differences between DGS \cite{mmfts} and DGS (notes) in parallel is the coefficient of $\delta_{i,j}$ in updating $p_{i-\oot,j-\oot}^{(k+1)}$ for the edge unit and the point unit. That is the reason why we introduce the matrix $\tilde \mfD$. The update rule in the notes can be understood as calculating \ref{dgsp} column by column, i.e.
+\begin{equation}
+\mfB\mfQ=\sum_l\mfB_l\mfQ_l, \quad \lp\tilde \mfD+\mfB^T\mfB\rp\mfQ=\sum_l\lp\tilde \mfD \mfB^T\mfB\rp_l\mfQ_l.
+\end{equation} 
+Here we shall emphasize that $\mfB\in\mbR^{2N(N-1)\times N^2}$ and $\mfQ\in \mbR^{N^2\times1}$.
+
+We shall point out that the update date rule on the notes shall be performed sequentially. Namely, we calculate $r_{i,j}$ through our update process. Otherwise, we might face divergence.
+
+\subsection{V-Cycle Multi-Grid method}
+We then introduce the V-Cycle multi-grid method. We first consider the restriction operator. 
+\subsubsection{Restriction}
+We consider the following matrix $W^{(1)}_N\in\mbR^{N\times 2N}$,
+\begin{eqt}
+W^{(1)}_N=\begin{bmatrix}
+1&1\\
+&&1&1\\
+&&&&\dots&\dots\\
+&&&&&&1&1\\
+\end{bmatrix}=I_N\otimes \begin{bmatrix}1&1\end{bmatrix},
+\end{eqt} and $W^{(2)}_N\in\mbR^{(N-1)\times (2N-1)}$,
+\begin{eqt}
+W_N^{(2)}=
+\begin{bmatrix}
+1&2&1\\
+&&1&2&1\\
+&&&&\dots&\dots&\dots\\
+&&&&&&1&2&1\\
+\end{bmatrix}=\begin{bmatrix}0&W_{N-1}^{(1)}\end{bmatrix}+\begin{bmatrix}W_{N-1}^{(1)}&0\end{bmatrix}.
+\end{eqt}
+
+At the $u$- and $v$ grid points, we consider six points restrictions, and at $p$-grid points, a four-point cell-centered restriction. In stencil notations, the restriction operators are (* indicates the position of the coarse-grid point). 
+\begin{eqt}
+\label{rh2h}
+R_{h/2,h}^u=\frac{1}{8}\begin{bmatrix}1&2&1\\
+&*\\
+1&2&1\\\end{bmatrix}, \quad R_{h/2,h}^v=\frac{1}{8}\begin{bmatrix}
+1&&1\\
+2&*&2\\
+1&&1\\\end{bmatrix}, \quad R_{h/2,h}^p=\frac{1}{4}\begin{bmatrix}
+1&&1\\
+&*&\\
+1&&1
+\end{bmatrix}.
+\end{eqt}
+
+We can write \ref{rh2h} element-wise
+\begin{eqt}
+U^{h}_{i,j}=\frac{1}{8}(U^{h/2}_{2i-1,2j-1}+2U^{h/2}_{2i,2j-1}+U^{h/2}_{2i+1,2j-1}+U^{h/2}_{2i-1,2j}+2U^{h/2}_{2i,2j}+U^{h/2}_{2i+1,2j}).
+\end{eqt}
+Therefore, the restriction operator for $u$ is given by 
+\begin{eqt}
+R_{h/2,h}^u=\frac{1}{8}W_N^{(1)}\otimes W_N^{(2)}.
+\end{eqt}
+Namely, we have
+\begin{eqt}
+\phi(U^{h})=R_{h/2,h}^u\phi(U^{h/2}).
+\end{eqt}
+Similarly, for $v$ we have
+\begin{eqt}
+R_{h/2,h}^v=R_{h/2,h}^u, \quad \psi(V^{h})=R_{h/2,h}^v\psi(V^{h/2}).
+\end{eqt}
+For $p$ we have 
+\begin{eqt}
+R_{h/2,h}^p=\frac{1}{4}W^{(1)}\otimes W^{(1)}, \quad \phi(P^{h})=P_{h,h/2}^u\phi(V^{h/2}).
+\end{eqt}
+The restriction of $f,g$ is similar to $u,v$ respectively, i.e., $R_{h/2,h}^f=R_{h/2,h}^g=R_{h/2,h}^u$. We denote
+\begin{eqt}
+R_{h/2,h}^U=R_{h/2,h}^F=\begin{bmatrix}
+R_{h/2,h}^u\\
+&R_{h/2,h}^u\\
+\end{bmatrix}.
+\end{eqt}
+
+\subsubsection{Lifting}
+The lifting operation corresponds to the transpose of restriction operation. We denote $W^{(3)}\in \mbR^{2N\times N}$ with $W^{(3)}_N=\left(W^{(1)}_N\right)^T$ and $W^{(4)}_N \in \mbR^{(2N-1)\times(N-1)}$ with $W^{(4)}_N=\left(W^{(2)}_N\right)^T$.
+
+For $u$, we consider the following element-wise lifting operation
+\begin{eqt}
+\label{u2i2j}
+&U^{h/2}_{2i,2j-1}=U^{h/2}_{2i,2j}=U^{h}_{i,j}, \quad U^{h/2}_{2i-1,2j-1}=U^{h/2}_{2i,2j}=\frac{1}{2}U^{h}_{i-1,j}+\frac{1}{2}U^{h}_{i,j}.
+\end{eqt}
+Therefore, we have
+\begin{eqt}
+R_{h,h/2}^u=\frac{1}{2}W_N^{(3)}\otimes W_N^{(4)}, \quad R_{h,h/2}^u\phi(U^{h})=\phi(U^{h/2}).
+\end{eqt}
+Similarly, we have $R_{2h,h}^v=R_{2h,h}^u$. For $p$, we have the following element-wise lifting operation
+\begin{eqt}
+P_{2i,2j}^h=P_{2i,2j-1}^h=P_{2i-1,2j}^h=P_{2i-1,2j-1}^h=P_{i,j}^{2h}.
+\end{eqt}
+Then, we have
+\begin{eqt}
+R_{h,h/2}^p=W_N^{(3)}\otimes W_N^{(3)}, \quad R_{h,h/2}^p\phi(P^{h})=\phi(P^{h/2}).
+\end{eqt}
+We denote
+\begin{eqt}
+R_{h,h/2}^U=\begin{bmatrix}
+R_{h,h/2}^u\\
+&R_{h,h/2}^u\\
+\end{bmatrix}.
+\end{eqt}
+
+We shall point out that $R_{h,h/2}^u=4\lp R_{h/2,h}^u\rp^T$ and $R_{h,h/2}^p=4\lp R_{h/2,h}^p\rp^T$. This results from that our multi-grid method is designed for the problem \ref{spp} which is not rescaled. If we change this multi-grid to the rescaled problem \ref{rspp}, we would have $\tilde R_{h,h/2}^u=\lp\tilde R_{h/2,h}^u\rp^T$ and $\lp\tilde R_{h,h/2}\rp^p= \lp\tilde  R_{h/2,h}^p\rp^T$
+
+\subsection{V-Cycle}
+\label{ssec:vcyc}
+We describe the update routine of V-Cycle. We have a stopping criterion $\epsilon$ for the V-Cycle and three parameters $v_1, v_2$ and $L$ for the V-Cycle. We denote $k$-th grid to be the grid with step size $2^{k-n}$. Suppose $N=2^{n}, L=2^l$. We denote $\mfA^{(k)}, \mfB^{(k)}$ to be $\mfA, \mfB$ in the $k$-th grid and $\mfF^{(k)}$ to be the initial residual in the $k$-th grid, i.e., $\mfF^{(0)}=\mfF$.  
+
+We start with $k=0$. We set the initial value $\mfU^{(k)}=0, \mfP^{(k)}=0$ and apply DGS $v_1$ times to get an approximate solution $\mfU^{(k)}$ and $\mfP^{(k)}$ to 
+\begin{eqt}
+\label{aubpf}
+\mfA^{(k)} \mfU^{(k)}+\mfB^{(k)}\mfP^{(k)}=\mfF^{(k)}, \quad \lp\mfB^{(k)}\rp^T\mfU^{(k)}=0,
+\end{eqt}
+and record them. Then, we compute the residual $\mfF_k$
+\begin{eqt}
+\label{mfFk}
+\mfF_k=\mfF^{(k)}-\lp\mfA^{(k)} \mfU^{(k)}+\mfB^{(k)}\mfP^{(k)}\rp.
+\end{eqt}
+We let $r_h=h^2\mfF_k$ as the residual for the rescaled problem \ref{rspp} and calculate $\|r_h\|_2$. If $\|r_h\|<\epsilon$, we stop the algorithm. Otherwise, we restrict $\mfF_k$ to $(k+1)$-th grid 
+\begin{eqt}
+\label{fkp1}
+\mfF^{(k+1)}=R_{2^kh,2^{k+1}h}^F\mfF_k,
+\end{eqt}
+replace $k=0$ with $k=1$ and move to Stage 1. 
+
+In Stage 1, we start with $k=1$. Given $k<n-l$, we set the initial value $\mfU^{(k)}=0, \mfP^{(k)}=0$ and apply DGS $v_1$ times to get an approximate solution $\mfU^{(k)}$ and $\mfP^{(k)}$ to \ref{aubpf} and record them. Then, we compute the residual $\mfF_k$ by \ref{mfFk}, restrict $\mfF_k$ onto $(k+1)$-th grid to get $\mfF^{(k+1)}$ by \ref{fkp1}, and replace $k$ with $k+1$ until $k=n-l$. 
+
+For $k=n-l$, we set the initial value $\mfU^{(k)}=0, \mfP^{(k)}=0$ and apply DGS $v_1$ times to get an approximate solution $\mfU^{(k)}$ and $\mfP^{(k)}$ to \ref{aubpf}. We let $\mfU^{[n-l]}=\mfU^{(n-l)}$ and $\mfP^{[n-l]}=\mfP^{(n-l)}$. We move forward to Stage 2. 
+
+In Stage 2, we start with $k=n-l$. Given $k$, we lift $\mfU^{[k]}$, $\mfP^{[k]}$ to $(k-1)$-th stage, and update
+\begin{eqt}
+\mfU_{k-1}=\mfU^{(k-1)}+R_{2^kh,2^{k-1}h}^U\mfU^{[k]},\quad  \mfP_{k-1}=\mfP^{(k-1)}+R_{2^kh,2^{k-1}h}^p\mfP^{[k]}.
+\end{eqt}
+where $\mfU^{(k-1)}, \mfP^{(k-1)}$ is recorded in Stage 1. Then, we use $\mfU_{k-1}$ and $\mfP_{k-1}$ as initial value, run DGS $v_2$ times to get the approximate solution $\mfU^{[k-1]}$ and $\mfP^{[k-1]}$ to \ref{aubpf} with $k$ replaced by $k-1$. Then we replace $k$ by $k-1$ until $k=0$. 
+
+With $k=0$, we calculate the residual $\mfF_k$ by \ref{mfFk} and let $r_h=h^2 \mfF_k$. If $\|r_h\|_2<\epsilon$, we stop the algorithm. Otherwise, we restrict $\mfF_k$ to the $(k+1)$-th grid, calculate $\mfF^{(1)}$ by \ref{fkp1}, replace $k=0$ by $k=1$ and return to Stage 1.
+
+We will elaborate the selection of $\epsilon$ in Section \ref{sec:num}.
+
+\section{V-Cycle Multi-Grid Based on Uzawa (Problem 2, 3, 4)}
+\label{sec:prob2}
+The routine of V-Cycle is same as the one in Section \ref{ssec:vcyc}.
+\subsection{Uzawa Iteration}
+We introduce the routine of Uzawa Iteration. Suppose we have the initial value $\mfP_0$. We start from $k=0$. Given $\mfP_k$. We consider to solve $\mfU_{k+1}$ from 
+\begin{eqt}
+\label{aufbp}
+\mfA\mfU_{k+1}=\mfF-\mfB\mfP_k.
+\end{eqt}
+Then, we update the pressure
+\begin{eqt}
+\mfP_{k+1}=\mfP_k+\alpha \mfB^T\mfU_{k+1}.
+\end{eqt}
+where $\alpha$ is a parameter. About the selection of $\alpha$, because we have
+\begin{eqt}
+\mfP_{k+1}=(I-\alpha \mfB^T\mfA^{-1}\mfB)\mfP_k+\alpha\mfB^T\mfA^{-1}\mfF.
+\end{eqt}
+We prove the following proposition on notes:
+\begin{proposition}
+$\arg\min\limits_{\alpha>0} \rho(I-\alpha \mfB^T\mfA^{-1}\mfB)$ is given by 
+\begin{eqt}
+\label{alpha}
+\alpha^*=\frac{2}{\lambda_{min}(\mfB^T\mfA^{-1}\mfB)+\lambda_{max}(\mfB^T\mfA^{-1}\mfB)}.
+\end{eqt}
+\end{proposition}
+\begin{proof}
+We denote $\mfC =  \mfB^T\mfA^{-1}\mfB$. Because $\mfA$ is positive definite, $\mfC$ is semi-definite positive. Suppose $\lambda$ is $\mfC$'s eigen value and $\mfx\in\mbR^{N^2}$ is its eigen-vector, i.e.
+\begin{eqt}
+\lambda\mfx = (I-\alpha\mfC)\mfx = \mfx-\alpha\mfC\mfx.
+\end{eqt}
+As a result, $\mfx$ is a eigen-vector of $\mfC$ and we have
+\begin{eqt}
+\mfC\mfx=\frac{1-\lambda}{\alpha}\mfx.
+\end{eqt}
+Then $\frac{1-\lambda}{\alpha}$ is the eigen-value of $\mfC$.  Suppose $\frac{1-\lambda}{\alpha}=\beta$, then, $\lambda = 1-\alpha\beta$. Therefore, we have
+\begin{eqt}
+\arg\min\limits_{\alpha>0} \rho(I-\alpha\mfC) = \arg\min\limits_{\alpha>0} \max\limits_{\lambda_{min}(\mfC)\leq\beta\leq\lambda_{max}(\mfC)}|1-\alpha\beta|
+\end{eqt}
+Directly by the properties of Chebyshev polynomial, \ref{alpha} holds. Q.E.D.
+\end{proof}
+
+We shall point out that $\mfB^T\mfA^{-1}\mfB$ is singular. Note that $\begin{bmatrix}\mfA&\mfB\\\mfB^T&0\end{bmatrix}$ is singular, because both $\begin{bmatrix}\mfU\\\mfP\end{bmatrix}$ and $\begin{bmatrix}\mfU\\\mfP+c\mathbf{1}\end{bmatrix}$ is the solution to \ref{spp}, where $c$ is any real number. Therefore, by the definition of Schur-complement, $\mfB^T\mfA^{-1}\mfB$ is singular and $\lambda_{min}(\mfB^T\mfA^{-1}\mfB)=0$. Our latter analysis tells us the eigen values of $\mfB^T\mfA^{-1}\mfB$ only consist of $0,1$. Therefore, the optimal choice for $\alpha$ is $2$. Nevertheless, $\alpha=1$ achieves the best performance. We will explain this in next subsubsection.
+
+\subsubsection{Convergence of Uzawa Iteration}
+We observe that $\mfB^T\mfA^{-1}\mfB=\lp B_N^{(1)}\rp^TA_N^{-1}B_N^{(1)}+\lp B_N^{(2)}\rp^TA_N^{-1}B_N^{(2)}$. Notce that $A_N=S_{N-1}^{(2)}\otimes I_{N-1}+I_N\otimes T_{N-1}$. We know that $T_{N-1}$ has spectral $\{\eta_m\}_{m=1}^{N-1}$ where $\eta_m=2\lp1-\cos\frac{m\pi}{N}\rp=4\sin^2\frac{m\pi}{2N}$. The corresponding eigen vector for $\eta_m$ is 
+\begin{eqt}
+t_m=\left[\sin\frac{m\pi}{N}, \sin\frac{2m\pi}{N}, \dots \sin\frac{(N-1)m\pi}{N}\right]^T.
+\end{eqt}
+$S_{N-1}^2$ has spectral $\{\xi_n\}_{n=1}^{N}$ where $\xi_n=2\lp1-\cos \frac{(n-1)\pi}{N}\rp=4\sin^2\frac{(n-1)\pi}{2N}$. The corresponding eigen vector for $\xi_n$ is 
+\begin{eqt}
+s_n = \left[ \cos\frac{(n-1)\pi}{2N}, \cos\frac{3(n-1)\pi}{2N}, \dots \cos\frac{(2N-1)(n-1)\pi}{2N}  \right]^T.
+\end{eqt}
+Therefore, $A_N$ has spectral $\{\lambda_{m,n}\}_{1\leq m\leq N-1, 1\leq n\leq N}$ where $\lambda_{m,n}=\eta_m+\xi_n=4\sin^2\frac{m\pi}{2N}+4\sin^2\frac{(n-1)\pi}{2N}$. The corresponding eigen vector for $\lambda_{m,n}$ is $s_n\otimes t_m$. We can verify that
+\begin{eqt}
+&\lp S_{N-1}^{(2)}\otimes I_{N-1}\rp(s_n\otimes t_m)=\lp S_{N-1}^{(2)}s_n \rp \otimes t_m=\xi_n s_n\otimes t_m,\\
+&\lp I_N\otimes T_{N-1}\rp(s_n\otimes t_m)=s_n\otimes\lp  T_{N-1} t_m \rp=\eta_m s_n\otimes t_m.\\
+\end{eqt}
+We denote $a^{(m,n)}=s_n\otimes t_m/l_{m,n}$, where 
+\begin{eqt}
+l_{m,n}=\|s_n\otimes t_m\|_2=\left\{\begin{aligned}
+&\frac{N}{2}, \quad &n>1\\
+&\frac{N}{\sqrt{2}}, \quad &n=1\\
+\end{aligned}\right.
+\end{eqt}
+Therefore, we have the spectral decomposition of $A_N^{-1}$ as follows:
+\begin{eqt}
+A_N^{-1}=\sum_{m=1}^{N}\sum_{n=1}^{N-1}\lambda_{m,n}^{-1}a^{(m,n)}\lp a^{(m,n)}\rp^T.
+\end{eqt}
+Notice that $a^{(m,n)}_{i,j}=l_{m,n}^{-1}\sin\frac{m\pi i}{N}\cos\frac{(n-1)\pi(2j-1)}{2N}$. Therefore, based on \ref{bn1t} and \ref{bn2t} in Section \ref{sec:dotb}, 
+\begin{eqt}
+(B_N^{(1)})^Ta^{(m,n)}=&l_{m,n}^{-1}\sum_{j=1}^Ne_N^{(j)} \otimes \begin{bmatrix}
+a^{(m,n)}_{0,j}-a^{(m,n)}_{1,j}\\
+\vdots\\
+a^{(m,n)}_{N-1,j}-a^{(m,n)}_{N,j}
+\end{bmatrix} \\
+=&l_{m,n}^{-1}\sum_{j=1}^N\begin{bmatrix}
+\sin\frac{m\pi0}{N}-\sin\frac{m\pi}{N}\\
+\vdots\\
+\sin\frac{m\pi (N-1)}{N}-\sin\frac{m\pi N}{N}
+\end{bmatrix}\otimes \cos\frac{(n-1)\pi(2j-1)}{N}e_N^{(j)}\\
+=&-2\sin\frac{m\pi}{2N}l_{m,n}^{-1}s_n\otimes \tilde t_m.
+\end{eqt}
+\begin{eqt}
+(B_N^{(2)})^Ta^{(m,n)}=&l_{m,n}^{-1}\sum_{j=1}^N\begin{bmatrix}
+a^{(m,n)}_{0,j}-a^{(m,n)}_{1,j}\\
+\vdots\\
+a^{(m,n)}_{N-1,j}-a^{(m,n)}_{N,j}
+\end{bmatrix}  \otimes e_N^{(j)} \\
+=&l_{m,n}^{-1}\sum_{j=1}^N\begin{bmatrix}
+\sin\frac{m\pi0}{2N}-\sin\frac{m\pi}{2N}\\
+\vdots\\
+\sin\frac{m\pi (N-1)}{2N}-\sin\frac{m\pi N}{2N}
+\end{bmatrix}\otimes \cos\frac{(n-1)\pi(2j-1)}{N}e_N^{(j)}\\
+=&-2\sin\frac{m\pi}{2N}l_{m,n}^{-1}\tilde t_m\otimes s_n.
+\end{eqt}
+where $\tilde t_m\in \mbR^{N}$ is with entry
+\begin{eqt}\tilde t_m=\begin{bmatrix}
+\cos \frac{m\pi}{2N}\\
+\cos \frac{3m\pi}{2N}\\
+\vdots\\
+\cos \frac{m\pi(2N-1)}{2N}\\
+\end{bmatrix}=s_{m+1}.
+\end{eqt}
+We denote $\delta_{m,n}=4\sin^2\frac{m\pi}{2N}\lambda_{m,n+1}^{-1}=\frac{\sin^2\frac{m\pi}{2N}}{\sin^2\frac{m\pi}{2N}+\sin^2\frac{n\pi}{2N}}$, 
+\begin{eqt}S^{m,n}=\lp s_{m+1}\otimes s_{n+1}\rp^T\lp s_{m+1}\otimes s_{n+1}\rp=\lp s_{m+1}s_{m+1}^T\rp\otimes \lp s_{n+1}^T s_{n+1}\rp
+\end{eqt}
+Note that 
+\begin{eqt}
+&\lp\sum_{n=1}^{N-1}s_{n+1}^T s_{n+1} \rp_{i,j}=\sum_{n=1}^{N-1} \cos\frac{n\pi(2j-1)}{2N}\cos\frac{n\pi(2i-1)}{2N}\\
+=&\frac{1}{2}\sum_{n=1}^{N-1}\cos\frac{(i+j-1)n\pi}{N}+\cos\frac{(i-j)n\pi}{N}.
+\end{eqt}
+Because $N$ is even, we have
+\begin{equation}
+\sum_{n=1}^{N-1}\cos\frac{kn\pi}{N}=\left\{\begin{aligned}
+&N-1, \quad &k=0\\
+&0, & k\neq 0 , 2|k+1\\
+&-1, & k\neq 0 , 2|k\\
+\end{aligned}\right.
+\end{equation} 
+Therefore, 
+\begin{eqt}\sum_{n=1}^{N-1}s_{n+1}^T s_{n+1}=\frac{N}{2}I_N-\frac{1}{2}E_N.
+\end{eqt}
+where $E_N\in \mbR^{N\times N}$ is the matrix with all entries equal to $1$. Then, we have
+\begin{eqt}
+&\mfB^T\mfA^{-1}\mfB=\lp B_N^{(1)}\rp^TA_N^{-1}B_N^{(1)}+\lp B_N^{(2)}\rp^TA_N^{-1}B_N^{(2)}\\
+=&\sum_{m=1}^{N-1}\sum_{n=1}^{N}4\sin^2\frac{m\pi}{2N}\lambda_{m,n}^{-1}l_{m,n}^{-2}\lp\lp s_{m+1}s_{m+1}^T\rp\otimes \lp s_n^T s_n \rp+\lp s_{n}s_{n}^T\rp\otimes \lp s_{m+1}^T s_{m+1} \rp\rp \\
+=&\sum_{m=1}^{N-1}\sum_{n=1}^{N-1}\frac{4\delta_{m,n}}{N^2}\lp S^{(m,n)}+S^{(n,m)}\rp+\sum_{m=1}^{N-1}\frac{2}{N^2}(S^{(0,m)}+S^{(m,0)})\\ 
+=&\frac{4}{N^2}\sum_{m=1}^{N-1}\sum_{n=1}^{N-1}\lp \delta_{m,n}S^{(m,n)}+\delta_{n,m}S^{(m,n)}\rp+\frac{2}{N^2}\sum_{m=1}^{N-1}S^{(0,m)}+S^{(m,0)}\\
+=&\frac{4}{N^2}\sum_{m=1}^{N-1}\sum_{n=1}^{N-1}S^{(m,n)}+\frac{2}{N^2}\sum_{m=1}^{N-1}S^{(0,m)}+S^{(m,0)}\\
+=&\frac{1}{N^2}(NI_N-E_N)\otimes(NI_N-E_N)+\frac{1}{N^2}E_N\otimes (NI_N-E_N)+\frac{1}{N^2}(NI_N-E_N)\otimes E_N\\
+=&I_N\otimes I_N-\frac{1}{N^2}E_N\otimes E_N=I_{N^2}-\lp\frac{s_1\otimes s_1}{N}\rp\lp\frac{s_1\otimes s_1}{N}\rp^T
+\end{eqt}
+Let us denote $\mfv=\frac{s_1\otimes s_1}{N}$. $\mfv^T\mfv=\|\mfv\|_2^2=\frac{N^2}{N^2}=1$. As a result, 
+\begin{eqt}
+\label{lprp}
+&\lp\mfB^T\mfA^{-1}\mfB\rp^2 = \lp I_{N^2}-\mfv\mfv^T\rp^2=I_{N^2}-2\mfv\mfv^T+\mfv\mfv^T\mfv\mfv^T=I_{N^2}-\mfv\mfv^T=\mfB^T\mfA^{-1}\mfB
+\end{eqt}
+\ref{lprp} tells us $\mfB^T\mfA^{-1}\mfB$ is a projection matrix. Based on \ref{lprp}, we have the following proposition: 
+
+\begin{proposition}
+\label{uzawa_conv}
+We take $\alpha = 1$. If $\mfF\in\mathrm{range}(\mfB)$, then the exact Uzawa Iteration will converge in at most 2 iteration. Namely, If $\mfP_0=0$, $\mfP_1 = \mfB^T\mfA^{-1}\mfF$, $\mfU_2=\mfA^{-1}(\mfF-\mfB\mfP_1)$, $\mfP_2 = (I-\mfB^T\mfA^{-1}\mfB)\mfP_1+\mfB^T\mfA^{-1}\mfF$. Then $\mfU_2$ and $\mfP_2$ are the exact solution to \ref{spp}.
+\end{proposition}
+\begin{proof}
+By \ref{lprp} we have $\lp\mfB^T\mfA^{-1}\mfB\rp^2=\mfB^T\mfA^{-1}\mfB$. Then
+\begin{eqt}
+\mfB^T\mfU_2 = \mfB^T\mfA^{-1}\mfF-\mfB^T\mfA^{-1}\mfB\mfP_1=\mfB^T\mfA^{-1}\mfB\mfM-\lp\mfB^T\mfA^{-1}\mfB\rp^2\mfM=0
+\end{eqt}
+\begin{eqt}
+\mfA\mfU_2+\mfB\mfP_2&=\mfF-\mfB\mfP_1+\mfB(2I-\mfB^T\mfA^{-1}\mfB)\mfP_1=\mfF-\mfB(I-\mfB^T\mfA^{-1}\mfB)\mfP_1\\
+&=\mfF-\mfB(I-\mfB^T\mfA^{-1}\mfB)\mfB^T\mfA^{-1}\mfF\\
+&=\mfB\mfM-\mfB(I-\mfB^T\mfA^{-1}\mfB)\mfB^T\mfA^{-1}\mfB\mfM\\
+&=\mfB\lp\mfB^T\mfA^{-1}\mfB-\lp\mfB^T\mfA^{-1}\mfB\rp^2\rp\mfM=0
+\end{eqt}
+Q.E.D.
+\end{proof}
+\subsection{Inexact Uzawa Iteration}
+\label{ssec:num_iui}
+The difference between Inexact Uzawa Iteration and Uzawa Iteration is that we do not solve the solution to \ref{aufbp}. Instead, we find an approximate solution $\tilde \mfU_{k+1}$ s.t. 
+\begin{eqt}
+\|\mfA\tilde\mfU_{k+1}-(\mfF-\mfB\mfP_k)\|_2\leq\tau
+\end{eqt}
+where $\tau$ is a parameter for Inexact Uzawa Iteration. We take $\mfU_k$ as initial value and apply Conjugate Gradient method to obtain $\mfU_{k+1}$. 
+
+\subsection{Inexact Uzawa Iteration Based On V-Cycle multi-grid}
+Here we introduce another approach to solve \ref{spp}. We only use Inexact Uzawa Iteration but we solve the subproblem approximately by V-Cycle multi-grid instead of CG in \ref{ssec:num_iui}. We choose Gauss-Seidel Iteration as smoother for V-Cycle multi-grid.
+
+\section{Numerical results}
+\label{sec:num}
+\subsection{DGS Iteration (Problem 1)}
+We apply the V-Cycle multi-grid method to solve the saddle point problem \ref{spp}. 
+\begin{itemize}
+\item `DGS-s' represents our implementation of DGS in the notes and `s' is the abbreviation of `sequence'.
+\item `DGS-p' represents our implementation of DGS in \cite{mmfts} and `p' is the abbreviation of `parallel' ; 
+\end{itemize}
+
+We evaluate the selection of parameters $L, v_1$ and $v_2$ by three criterions: `time' denotes cpu-time; `VC' denotes the number of V-Cycle; $e_N$ is the error to the true solution, i.e.
+\begin{eqt}
+e _ { N } = h \left( \sum _ { j = 1 } ^ { N } \sum _ { i = 1 } ^ { N - 1 } \left| u _ { i , j - \frac { 1 } { 2 } } - u \left( x _ { i } , y _ { j - \frac { 1 } { 2 } } \right) \right| ^ { 2 } + \sum _ { j = 1 } ^ { N - 1 } \sum _ { i = 1 } ^ { N } \left| v _ { i - \frac { 1 } { 2 } , j } - u \left( x _ { i - \frac { 1 } { 2 } } , y _ { j } \right) \right| ^ { 2 } \right) ^ { 1 / 2 }.
+\end{eqt}
+where $u(x,y)$ and $v(x,y)$ is the true solution \ref{true_sol} to the Stokes equation \ref{stokes}.
+
+In our numerical experiment, for simplicity, we take $v_1=v_2=v=[10, 20, 40, 80, 160]$. For $N=64, 128, 256$, we set the stopping criterion $\epsilon=10^{-8}$ and the maximum number of V-Cycle to be $500$.
+
+\input{project/DGS-64}
+\input{project/DGS-128}
+\input{project/DGS-256}
+
+From Table \ref{DGS-64}, \ref{DGS-128} and \ref{DGS-256}, we observe that  DGS-s takes more iterations and longer time than DGS-p to make $\|r_h\|<_2$. And DGS-s is more probable to exceed the maximum number of V-Cycle, especially when $v$ is small or $L$ is large. Nevertheless, DGS-s achieves much lower $e_N$ than DGS-p. We see that sometimes, with same parameters,  $\|r_h\|$ in DGS-s is much smaller than DGS-p, but $e_N$ in DGS-s is much smaller than DGS-p. One possible explanation is that the solution from DGS-p is easier to satisfy 
+\begin{eqt}
+\label{mainstokes}
+\mfA \mfU+\mfB\mfP=\mfF,
+\end{eqt}
+while the solution from DGS-s is easier to satisfy the incompressible condition. And our stopping criterion is to stop when we have a small residual for \ref{mainstokes}. Therefore, DGS-s finds a solution that is much closer to the true solution to \ref{stokes}. 
+
+For $N = 512, 1024, 2048$, we set the stopping criterion $\epsilon =10^{-6}$ and the maximum number of V-Cycle to be $100$. For $N = 512, 1024$, we take $v = [20, 40, 80, 160]$.  For $N=2048$, we take $v = [40, 80, 160]$. The result of $N=512$ is shown in Table \ref{DGS-512}; the result of $N=1024$ is shown in Table \ref{DGS-1024}; the result of $N=2048$ is shown in Table \ref{DGS-2048}.
+
+\input{project/DGS-512}
+\input{project/DGS-1024}
+\input{project/DGS-2048}
+
+We find that the numerical results are not ideal. DGS-p does not get the required precision of $\|r_h\|_2$ within the maximum number of V-Cycles and DGS-s does not find a solution that is close to the true solution. In Appendix \ref{appendix}, we modify the V-Cycle multi-grid based on DGS. Our modification leads to great improvement in time and $e_N$ for both DGS-p and DGS-s.
+
+\subsection{Uzawa Iteration (Problem 2)}
+We apply the V-Cycle multi-grid method to solve the saddle point problem \ref{spp}. We use Uzawa Iteration as smoother instead of DGS. 
+
+We assume that $v_1=v_2=v$. For $N=64, 128$, we set the stopping criterion $\epsilon = 10^{-8}$. We take $\alpha = [0.5, 0.75, 1, 1.5, 2]$. We set the maximum number of V-Cycle to be $100$. We take $L=[4, 16]$. 
+The result of $N=64$ is shown in Table \ref{uzawa-64}; the result of $N=128$ is shown in Table \ref{uzawa-128}.  From Table \ref{uzawa-64} and Table \ref{uzawa-128}, we observe that $\alpha = N^2$ is the best choice of $\alpha$. With $\alpha = N^2$, after 2 Uzawa Iteration, $\|r_h\|_2$ appears to be lower than $10^{-8}$. If we set $\alpha=2$, the performance is terrible, although $\alpha=2$ is an optimal choice by \ref{alpha}. We also obverse that with $\alpha$ closer to $1$, Uzawa Iteration achieves better performance. This is consistent with our proof.
+
+\input{project/uzawa-64}
+\input{project/uzawa-128}
+
+For $N=256, 512$, we set the maximum number of V-Cycle to be $20$. We take $L=[4, 16, 64]$. The result of $N=256$ is shown in Table \ref{uzawa-256-1} and \ref{uzawa-256-2}; the result of $N=512$ is shown in Table \ref{uzawa-512-1} and \ref{uzawa-512-2}. With $\alpha=1$, Uzawa Iteration converges with 2 iterations. Therefore, the number of V-Cycle is $0$. 
+\input{project/uzawa-256-1}
+\input{project/uzawa-256-2}
+\input{project/uzawa-512-1}
+\input{project/uzawa-512-2}
+
+For $N=1024, 2048$, we set the stopping criterion $\epsilon = 10^{-6}$ and set the maximum number of V-Cycle to be $10$. We take $L=[4, 16, 64]$. The result of $N=1024$ is shown in Table \ref{ieuzawa-1024-1} and \ref{uzawa-1024-2}; the result of $N=2048$ is shown in Table \ref{uzawa-2048-1} and \ref{uzawa-2048-2}. This numerically verifies our proposition \ref{uzawa_conv}.
+\input{project/uzawa-1024-1}
+\input{project/uzawa-1024-2}
+\input{project/uzawa-2048-1}
+\input{project/uzawa-2048-2}
+
+\subsection{Inexact Uzawa Iteration (Problem 3)}
+We apply the V-Cycle multi-grid method to solve the saddle point problem \ref{spp}. We use Inexact Uzawa Iteration as smoother instead of DGS. 
+
+We assume that $v_1=v_2=v$. For $N=64, 128$, we set the stopping criterion $\epsilon = 10^{-8}$. Based on the result in Section \ref{ssec:num_iui}, we fix $\alpha = 1$. We take $\tau=[10^{-6}, 10^{-7}, 10^{-8}, 10^{-9}]$. We set the maximum number of V-Cycle to be $100$. The result of $N=64$ is shown in Table \ref{ieuzawa-64}; the result of $N=128$ is shown in Table \ref{ieuzawa-128}. We observe that even with inexact solution to the subproblem \ref{aubpf}, Inexact Uzawa converges in an incredible speed with $\alpha = 1$. This is consistent with our proof.
+
+\input{project/ieuzawa-64}
+\input{project/ieuzawa-128}
+
+For $N=256, 512$, we set the stopping criterion $\epsilon = 10^{-7}$ and set the maximum number of V-Cycle to be $20$. We take $\tau=[10^{-5}, 10^{-6}, 10^{-7}, 10^{-8}]$, $L=[4,16,64]$. The result of $N=256$ is shown in Table \ref{ieuzawa-256-1} and \ref{ieuzawa-256-2}; the result of $N=512$ is shown in Table \ref{ieuzawa-512-1} and \ref{ieuzawa-512-2}.
+\input{project/ieuzawa-256-1}
+\input{project/ieuzawa-256-2}
+\input{project/ieuzawa-512-1}
+\input{project/ieuzawa-512-2}
+
+For $N=1024, 2048$, we set the stopping criterion $\epsilon = 10^{-6}$ and set the maximum number of V-Cycle to be $10$. We take $\tau=[10^{-4}, 10^{-5}, 10^{-6}, 10^{-7}]$, $L=[4, 16 ,64, 256]$. The result of $N=1024$ is shown in Table \ref{ieuzawa-1024-1} and \ref{ieuzawa-1024-2}; the result of $N=2048$ is shown in Table \ref{ieuzawa-2048-1} and \ref{ieuzawa-2048-2}.
+
+\input{project/ieuzawa-1024-1}
+\input{project/ieuzawa-1024-2}
+\input{project/ieuzawa-2048-1}
+\input{project/ieuzawa-2048-2}
+
+In summary, with $\alpha=1$, even with inexact solution to the subproblem, Inexact Uzawa converges in 2 iterations. Namely, Inexact Uzawa does not use the structure of V-Cycle multi-grid because VCs in the numerical results are $0$. We shall point out that forcing Inexact Uzawa to use the structure of V-Cycle multi-grid will greatly deteriorate the performance. This can be verified in Subsection \ref{ssec:iuibo}.
+
+\subsection{Inexact Uzawa Iteration Based On V-Cycle multi-grid (Problem 4)}
+\label{ssec:iuibo}
+We apply Inexact Uzawa Iteration Based On V-Cycle multi-grid to solve the saddle point problem \ref{spp}. `iter' denotes the number of outer loop.
+
+We assume that $v_1=v_2=v$. For $N=64, 128$, we set the stopping criterion $\epsilon = 10^{-8}$. Based on the result in Section \ref{ssec:num_iui}, we fix $\alpha = 1$. We take $\tau=[10^{-6}, 10^{-7}, 10^{-8}, 10^{-9}]$. We set the maximum number of V-Cycle to be $100$ and the maximum number of outer loop to be $100$. The result of $N=64$ is shown in Table \ref{ieuzawaVC-64}; the result of $N=128$ is shown in Table \ref{ieuzawaVC-128}. We observe that if we set $\tau$ too big, i.e., $\tau\leq 10^{-7}$, Inexact Uzawa will converge slowly. But if we select an appropriate $\tau$, Inexact Uzawa converges in an incredibly fast speed, namely 2 iteration. This is consistent with our proof.
+
+\input{project/ieuzawaVC-64}
+\input{project/ieuzawaVC-128}
+
+For $N=256, 512$, we set the stopping criterion $\epsilon = 10^{-7}$. We take $\tau=[10^{-5}, 10^{-6}, 10^{-7}, 10^{-8}]$. The result of $N=256$ is shown in Table \ref{ieuzawaVC-256-1} and \ref{ieuzawaVC-256-2}; the result of $N=512$ is shown in Table \ref{ieuzawaVC-512-1} and \ref{ieuzawaVC-512-2}.
+\input{project/ieuzawaVC-256-1}
+\input{project/ieuzawaVC-256-2}
+\input{project/ieuzawaVC-512-1}
+\input{project/ieuzawaVC-512-2}
+
+For $N=1024, 2048$, we set the stopping criterion $\epsilon = 10^{-6}$. We take $\tau=[10^{-4}, 10^{-5}, 10^{-6}, 10^{-7}]$. The result of $N=1024$ is shown in Table \ref{ieuzawaVC-1024-1} and \ref{ieuzawaVC-1024-2}; the result of $N=2048$ is shown in Table \ref{ieuzawaVC-2048-1} and \ref{ieuzawaVC-2048-2}.
+
+\input{project/ieuzawaVC-1024-1}
+\input{project/ieuzawaVC-1024-2}
+\input{project/ieuzawaVC-2048-1}
+\input{project/ieuzawaVC-2048-2}
+
+With a proper choice of $L$ and $\tau$, i.e. $L=4, \tau=10^{-8}$, Ineaxt Uzawa based on V-Cycle multi-grid can converge in 2 iterations.
+
+\section{Conclusion}
+Our work for numerical solutions to Stokes equation ends up here, but new ideas for improvement and continuous passion for research will never fade. We give a brief summary of what we have done and an outlook of what we can improve.
+
+We try to solve Stokes equation numerically. Through MAC scheme, we formulate a saddle point problem. However, the equation itself is undetermined. Therefore, we introduce V-Cycle multi-grid method and choose Distributive Gauss Seidel Iteration and Uzawa Iteration as smoother. For DGS, we find that whether to update in parallel or in sequence and the management of edge units and point units influence the convergence speed of the algorithm. We also have other selection of restricting and lifting operators but it affects the converge speed slightly. The numerical results of DGS are not ideal. In Appendix \ref{appendix}, we show that projecting the residual of $\mfB^T\mfU=0$ will greatly improve the performance of DGS, especially DGS-s. With this modification on V-Cycle, DGS-s outperforms Uzawa and Inexact Uzawa.
+
+For Uzawa, we observe and rigorously prove that Uzawa will converge in at most $2$ iterations. This is because $\mfB^T\mfA^{-1}\mfB$ is projection matrix, which can be proved through spectral analysis. Our numerical experiments are consistent with this proposition. Further numerical results show that even with inexact solution to the subproblem, Inexact Uzawa can still converge in at most $2$ iterations. That means using Uzawa as smoother in V-Cycle is unnecessary. Uzawa itself can solve the saddle point problem efficiently. Specifically, Uzawa turns solving the original undetermined problem into solving a determined subproblem. (Because $\mfA$ is positive definite.) `$\textbackslash$' in matlab and Conjugate Gradient method may not be the ideal solver for solving the subproblem. We can enhance the speed of inexact Uzawa by choosing efficient solver for positive definite problems, i.e. spectral methods. 
+
+
+\appendix
+\section{Appendix: Modification of V-Cycle based on DGS}
+\label{appendix}
+From the numerical experiment, we find that V-Cycle based on DGS does not perform as good as we expected. Therefore, we consider to modify the V-Cycle multigrid a little bit. Note that we have not used the restriction operator for $P$. We consider to project the residual of $\mfB^T\mfU=0$ to the coarse grid. Specifically, for the saddle point problem on the coarse grid, we do not consider to solve \ref{spp}. Instead, we solve
+\begin{equation}
+\label{sppm}
+\begin{bmatrix}
+\mfA&\mfB\\\mfB^T&0
+\end{bmatrix}\begin{bmatrix}
+\mfU\\\mfP
+\end{bmatrix}=\begin{bmatrix}
+\mfF\\\mfR
+\end{bmatrix}.
+\end{equation}
+where $\mfR$ is the residual of $\mfB^T\mfU=0$ from the finer grid. For DGS-p and DGS-s, we only need to add $R_{i,j}$ to \ref{divequ}. And the calculation of $r_h$ in the V-Cycle turns to be
+\begin{eqt}
+r_h=h^2\begin{bmatrix}\mfF^{(k)}-\mfA^{(k)} \mfU^{(k)}+\mfB^{(k)}\mfP^{(k)}\\
+-\lp\mfB^{(k)}\rp^T\mfU^{(k)}\end{bmatrix}
+\end{eqt}
+where $k=0$. The numerical experiments show that this modification achieves great improvement.
+
+Similarly, for $N=64, 128, 256$, we set the stopping criterion $\epsilon=10^{-8}$ and the maximum number of V-Cycle to be $500$. We take $v_1=v_2=v=[10, 20, 40, 80, 160]$ and $L=[4, 16, 64]$. The result of $N=64$ is shown in Table \ref{DGS_mod-64}; the result of $N=128$ is shown in Table \ref{DGS_mod-128}; the result of $N=256$ is shown in Table \ref{DGS_mod-256}. We observe that with modification, DGS-s converges much faster. Though DGS-p becomes slower, it achieves lower $e_N$.
+
+\input{project/DGS_mod-64}
+\input{project/DGS_mod-128}
+\input{project/DGS_mod-256}
+
+For $N=512, 1024, 2048$, we set the stopping criterion $\epsilon =10^{-6}$ and the maximum number of V-Cycle to be $100$. We take $L=[4, 16, 64, 256]$. For $N = 512, 1024$, we take $v = [20, 40, 80, 160]$.  For $N=2048$, we take $v = [40, 80, 160]$. The result of $N=512$ is shown in Table \ref{DGS_mod-512}; the result of $N=1024$ is shown in Table \ref{DGS_mod-1024}; the result of $N=2048$ is shown in Table \ref{DGS_mod-2048}.
+
+\input{project/DGS_mod-512}
+\input{project/DGS_mod-1024}
+\input{project/DGS_mod-2048}
+
+Taking $L=4$ and $v=10,20,40$, DGS-s converges fast and converges to a precise solution. Notably, DGS-s is faster than Uzawa and Inexact Uzawa. This is because although Uzawa can converge in 2 iterations, solving the subproblem in Uzawa is quite time-costly. Also, because Uzawa can converge in 2 iterations, the modification of the V-Cycle multi-grid method does not affect the performance of Uzawa and Inexact Uzawa.
+
+\printbibliography
+\end{document}
