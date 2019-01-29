@@ -76,15 +76,15 @@ Our Matlab programs are generally catogorized as follows:
 
 ### bnd
 
-'comp_*.m' generate the vector to describe the Neurman boundary condition
+'comp_*.m' generates the vector to describe the Neurman boundary condition
 
 ### comp
 
-'comp_*.m' generate matrix which is component in the formulation of saddle point problem.
+'comp_*.m' generates matrix which is component in the formulation of saddle point problem.
 
 ### spp
 
-'comp_*.m' generate matrix in the saddle point problem
+'comp_*.m' generates matrix in the saddle point problem
 
 ### test 
 
@@ -92,5 +92,5 @@ Our Matlab programs are generally catogorized as follows:
 
 ### true
 
-'true_*.m' return the true value of the function
+'true_*.m' returns the true value of the function
 
